@@ -58,11 +58,7 @@ cargo run
 
 本项目使用 mdBook 生成在线教程。
 
-在线阅读地址：
-
-```text
-https://superlxh02.github.io/rust-study/
-```
+[Rust 在线教程文档](https://superlxh02.github.io/rust-study/)
 
 本地构建：
 
