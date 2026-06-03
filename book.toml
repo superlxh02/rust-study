@@ -10,4 +10,4 @@ create-missing = false
 
 [output.html]
 default-theme = "rust"
-site-url = "/"
+site-url = "/rust-study/"
