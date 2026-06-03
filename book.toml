@@ -1,0 +1,13 @@
+[book]
+authors = ["lxh"]
+language = "zh-CN"
+src = "docs"
+title = "Rust 学习教程"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+default-theme = "rust"
+site-url = "/"
