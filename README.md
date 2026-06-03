@@ -58,6 +58,12 @@ cargo run
 
 本项目使用 mdBook 生成在线教程。
 
+在线阅读地址：
+
+```text
+https://superlxh02.github.io/rust-study/
+```
+
 本地构建：
 
 ```bash
@@ -75,27 +81,3 @@ mdbook serve --open
 ```bash
 ~/.cargo/bin/mdbook serve --open
 ```
-
-## GitHub Pages
-
-仓库包含 GitHub Actions workflow：
-
-```text
-.github/workflows/pages.yml
-```
-
-推送到 `main` 或 `master` 后，GitHub Actions 会自动执行：
-
-1. 安装 mdBook
-2. 构建 `docs/`
-3. 上传 `book/` 构建产物
-4. 部署到 GitHub Pages
-
-在 GitHub 仓库设置中，需要把 Pages 的 Source 设置为 **GitHub Actions**。
-
-## 开发约定
-
-- 文档标题由 `docs/SUMMARY.md` 组织章节顺序。
-- 单篇文档内部使用 `1 / 1.1 / 1.1.1` 的标题编号风格。
-- 示例代码集中放在 `src/study`，并通过 `study::xxx::demo()` 对外暴露。
-- 构建产物 `target/` 和 `book/` 不提交到仓库。
