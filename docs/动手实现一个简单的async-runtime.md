@@ -20,7 +20,7 @@
 
 1. **任务抽象**：用 `Task` 结构体包装一个 `Future`，并提供 `poll` 驱动能力。
 2. **调度器**：用 `Executor` 管理一个就绪任务队列，不断从队列中取出任务执行（`poll`）。
-3. **唤醒机制**：当任务返回 `Pending` 时，能够注册一个 `Waker`，当等待的事件就绪后通过 `Waker` 将任务重新放回队列。
+3. **唤醒机制**：`Future` 在 `poll` 过程中通过 `Context` 使用或保存 `Waker`，当等待的事件就绪后通过 `Waker` 将任务重新放回队列。
 4. **运行时入口**：提供 `spawn` 提交任务，`block_on` 阻塞运行直到根任务完成。
 
 我们的设计采用**单线程**模型：
@@ -29,7 +29,7 @@
 - 当队列为空但还有未完成的任务时，工作线程进入 `park` 状态，等待 `Waker` 唤醒。
 - `Waker` 唤醒时会把任务重新加入队列，并 `unpark` 工作线程。
 
-任务间的切换是**协作式**的：只有任务主动让出（返回 `Pending`）时，调度器才会切换到其他任务。
+任务间的切换是**协作式**的：任务在 `poll` 中返回 `Pending`（例如主动让出，或等待某个事件）后，调度器才会切换到其他就绪任务。
 
 ## 3. 核心组件与实现详解
 
@@ -304,15 +304,17 @@ fn yield_now() -> YieldNow {
 **效果**：
 任务在执行 `yield_now().await` 时，会**主动让出一次**，让调度器有机会运行其他就绪任务，然后在下一次循环中继续执行。这个机制模拟了异步操作中常见的“短暂让出”模式。
 
-注意：`wake_by_ref` 调用会导致 `schedule` 将当前任务重新放回队列，但由于我们还没有从 `poll_once` 返回，`is_queued` 尚未被设为 `false`？我们需要分析时序：
+这里要注意 `wake_by_ref` 与 `is_queued` 的时序：
 
 `poll_once` 中：
 
 1. 从 `future` 中 `take()` 出来。
 2. 构造 `Waker`。
 3. 调用 `future.poll()`。
-4. 在 `YieldNow::poll` 中，调用了 `wake_by_ref()` → `Task::wake_by_ref` → `schedule`。
-   - `schedule` 中检查 `is_queued.swap(true)`：此时 `is_queued` 还是 `true`（因为任务刚被从队列取出时，`run` 中设置了 `is_queued = false`？等一下，回顾 `run` 逻辑：从队列取出任务后，立即设置了 `task.is_queued.store(false)`。所以当进入 `poll_once` 时，`is_queued` 已经是 `false`。那么 `schedule` 中的 `swap(true)` 会返回 `false`，然后继续执行入队逻辑。因此 `schedule` 会成功将任务再次放入队列。
+4. 在 `YieldNow::poll` 中，调用了 `wake_by_ref()` -> `Task::wake_by_ref` -> `schedule`。
+   - 任务从队列取出后，`run` 已经执行了 `task.is_queued.store(false)`。
+   - 因此进入 `poll_once` 时，`is_queued` 是 `false`。
+   - `schedule` 中的 `is_queued.swap(true)` 返回 `false`，随后会把任务重新放入队列。
 5. `poll` 返回 `Pending`。
 6. `poll_once` 将 `future` 放回 `self.future`。
 7. 退出 `poll_once`，返回到 `run` 循环。
@@ -373,9 +375,7 @@ async fn main_task(runtime: Arc<Runtime>) {
     - `sub_task(1)` 返回 `Pending`，根任务暂停，根任务的 `poll` 也返回 `Pending`。
   - 根任务返回 `Pending` 之前，会将 `sub_task(1)` 的 future 状态保存（在根任务状态机中）。
   - `poll_once` 完成：由于 `Pending`，根任务的 future 被重新放回 `Task` 中（没有减少计数）。
-- 此时队列中有什么？在 `sub_task(1)` 的 `yield_now` 中，`wake_by_ref` 导致 `schedule` 将**当前任务（根任务？不对，`Waker` 来自根任务中的子任务？等一下，仔细看**：
-
-  `sub_task(1)` 是 `main_task` 中的一个 `await`，它的 `Waker` 是从根任务的状态机传递给它的。`sub_task(1)` 持有的 `Waker` 实际指向根任务（因为 `sub_task(1)` 的 `Context` 是从根任务的 `poll` 传下去的）。当 `yield_now` 调用 `cx.waker().wake_by_ref()` 时，唤醒的是根任务，而不是 `sub_task(1)` 本身。这意味着根任务会被重新入队。
+- 此时队列中有什么？`sub_task(1)` 是 `main_task` 中的一个 `.await`，它拿到的 `Waker` 来自根任务的 `poll` 上下文。因此，`yield_now` 调用 `cx.waker().wake_by_ref()` 时，唤醒的是根任务所在的 `Task`，而不是单独的 `sub_task(1)`。
 
   因此，`yield_now` 后，根任务重新放入了队列（`is_queued` 当时是 `false`，所以入队成功）。队列现在有根任务。
 

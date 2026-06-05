@@ -271,7 +271,7 @@ Trait 对象是一个胖指针：指向数据本身的指针 + 指向虚表（vt
 
 **技术要点**：
 
-- 只能对 **对象安全（object-safe）** 的 trait 创建 trait 对象。要求 trait 的方法不能有泛型参数，且返回类型不能是 `Self`（除非该方法接收 `self` 类型为 `Box<Self>` 等特殊情况）。
+- 只能对 **对象安全（object-safe）** 的 trait 创建 trait 对象。常见限制是：可通过 trait 对象调用的方法不能有泛型参数，不能直接返回 `Self`，也不能要求 `Self: Sized`。如果某个方法写了 `where Self: Sized`，它就不能通过 trait 对象调用，但通常不会阻止整个 trait 被做成 trait 对象。
 - Trait 对象必须通过某种指针（`&`、`Box`、`Rc` 等）包装。
 - 动态分发有少量运行时开销（一次间接跳转），但相比静态分发（单态化）可以减小二进制体积，并允许异构集合。
 
@@ -371,4 +371,4 @@ fn main() {
 #### 3.5.3 对象安全条件
 
 - `Shape` 的 `area(&self)` 和 `name(&self)` 返回 `f64` 和 `&str`，没有使用 `Self` 作为返回值（除了 `self` 本身），因此对象安全。
-- 如果 trait 中有 `fn new() -> Self` 这样的方法，就无法创建 trait 对象。
+- 如果 trait 中有 `fn new() -> Self` 这样的方法，并且没有加 `where Self: Sized` 把它排除在 trait 对象调用之外，就无法创建 trait 对象。

@@ -3,7 +3,7 @@
 
 ## 1. 线程安全问题的本质
 
-在多线程环境下，数据竞争（data race）是主要的安全隐患：多个线程同时访问同一内存位置，至少有一个是写操作，且没有同步机制。C/C++允许数据竞争，行为未定义。Rust通过所有权系统和**类型系统**在编译期杜绝数据竞争。
+在多线程环境下，数据竞争（data race）是主要的安全隐患：多个线程同时访问同一内存位置，至少有一个是写操作，且没有同步机制。C/C++ 中的数据竞争属于未定义行为。Rust 在 safe Rust 中通过所有权系统和**类型系统**在编译期杜绝数据竞争；如果使用 `unsafe`，则需要程序员自行维护这些安全不变量。
 
 ### 1.1 Rust的线程安全模型核心
 
@@ -23,19 +23,17 @@
 - 一个类型**仅当它所有字段都实现了 `Send`**时，才会自动实现 `Send`。
 - 裸指针（`*const T` / `*mut T`）**不实现 `Send`**，因为它们没有所有权语义。
 - `Rc<T>`（引用计数指针）**不实现 `Send`**，因为它的引用计数不是原子操作，跨线程会导致计数错误。
-- `Arc<T>`实现了 `Send`（要求 `T: Send + Sync`，见下文）。
+- `Arc<T>`实现了 `Send`（要求 `T: Send + Sync`，见下文）。这里的线程安全首先指引用计数本身安全；内部数据是否能被并发访问仍由 `T` 的 `Send`/`Sync` 决定。
 
 ### 2.3 手动实现 `Send`
 
-`Send`是一个 `unsafe trait`，因为手动标记意味着你承诺该类型在线程间传递是安全的。通常不需要手动实现，除非自定义类型包含非 `Send`字段但你确信安全（例如，使用锁保护）。
+`Send`是一个 `unsafe trait`，因为手动标记意味着你承诺该类型在线程间传递是安全的。通常不需要手动实现，除非自定义类型包含非 `Send`字段但你能证明它跨线程转移不会造成未定义行为。
 
 ```rust
-// 示例：自定义类型，包含一个裸指针，但我们通过互斥锁保护它，可以安全传递
-use std::sync::Mutex;
-
+// 示例：自定义类型包含裸指针。裸指针默认不是 Send，
+// 如果手动实现 Send，必须由类型作者保证跨线程转移是安全的。
 struct MyData {
     ptr: *mut u8, // 裸指针不实现Send
-    // 但我们可以通过Mutex包装后，让整体Send
 }
 
 // 不安全的手动标记，需内部保证线程安全
@@ -94,7 +92,7 @@ std::thread::spawn(|| {
 | `String`      | ✅    | ✅    | 堆数据，所有权唯一                  |
 | `*mut T`      | ❌    | ❌    | 裸指针，无安全保证                  |
 | `Rc<T>`       | ❌    | ❌    | 非原子引用计数                      |
-| `Arc<T>`      | ✅    | ✅    | 原子引用计数，要求 `T: Send + Sync` |
+| `Arc<T>`      | ✅    | ✅    | 引用计数是原子的；跨线程共享要求 `T: Send + Sync` |
 | `RefCell<T>`  | ✅    | ❌    | 内部可变性非线程安全                |
 | `Mutex<T>`    | ✅    | ✅    | 使用锁保证线程安全                  |
 | `RwLock<T>`   | ✅    | ✅    | 同上                                |
@@ -110,7 +108,7 @@ std::thread::spawn(|| {
 
 ### 5.2 `Sync`与内部可变性的关系
 
-- **单线程内部可变性**：`Cell<T>`/`RefCell<T>` **不实现 `Sync`**，因为它们的运行时借用检查不是原子操作，跨线程会导致数据竞争。
+- **单线程内部可变性**：`Cell<T>`/`RefCell<T>` **不实现 `Sync`**，因为它们的运行时借用检查不是原子操作；如果绕过类型系统把它们跨线程共享，就可能导致数据竞争。
 - **线程安全内部可变性**：`Mutex<T>`和 `RwLock<T>`通过锁机制实现了 `Sync`，因此可以被多个线程同时共享 `&Mutex<T>`。
 
 ### 5.3 示例对比
@@ -204,11 +202,9 @@ std::thread::spawn(move || {
 
 - **所有权 + 借用规则**：消除了数据竞争的根本可能性。
 - **`Send`和 `Sync`**：编译器可检查的标记，将线程安全责任从程序员转移到类型系统。
-- **无数据竞争**：Rust编译器保证，只要能编译通过的并发代码，就不会有数据竞争（未定义行为）。
+- **无数据竞争**：在 safe Rust 中，编译器和类型系统会阻止数据竞争；如果使用 `unsafe`，则需要程序员自己维护这些安全不变量。
 - **零成本抽象**：`Send`/`Sync`仅用于编译期检查，运行时无任何开销。
 
 掌握 `Send`和 `Sync`是理解Rust并发编程进阶内容（如异步、自定义数据结构）的基础。当你设计自己的并发类型时，应当仔细考虑这些trait的实现。
 
 **最终建议**：在99%的实践中，你不需要手动实现 `Send`/`Sync`；依赖编译器自动推导即可。只有当实现自定义并发原语或包裹裸指针时才需要深入了解。
-
-<style>#mermaid-1780139603750{font-family:sans-serif;font-size:16px;fill:#333;}#mermaid-1780139603750 .error-icon{fill:#552222;}#mermaid-1780139603750 .error-text{fill:#552222;stroke:#552222;}#mermaid-1780139603750 .edge-thickness-normal{stroke-width:2px;}#mermaid-1780139603750 .edge-thickness-thick{stroke-width:3.5px;}#mermaid-1780139603750 .edge-pattern-solid{stroke-dasharray:0;}#mermaid-1780139603750 .edge-pattern-dashed{stroke-dasharray:3;}#mermaid-1780139603750 .edge-pattern-dotted{stroke-dasharray:2;}#mermaid-1780139603750 .marker{fill:#333333;}#mermaid-1780139603750 .marker.cross{stroke:#333333;}#mermaid-1780139603750 svg{font-family:sans-serif;font-size:16px;}#mermaid-1780139603750 .label{font-family:sans-serif;color:#333;}#mermaid-1780139603750 .label text{fill:#333;}#mermaid-1780139603750 .node rect,#mermaid-1780139603750 .node circle,#mermaid-1780139603750 .node ellipse,#mermaid-1780139603750 .node polygon,#mermaid-1780139603750 .node path{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}#mermaid-1780139603750 .node .label{text-align:center;}#mermaid-1780139603750 .node.clickable{cursor:pointer;}#mermaid-1780139603750 .arrowheadPath{fill:#333333;}#mermaid-1780139603750 .edgePath .path{stroke:#333333;stroke-width:1.5px;}#mermaid-1780139603750 .flowchart-link{stroke:#333333;fill:none;}#mermaid-1780139603750 .edgeLabel{background-color:#e8e8e8;text-align:center;}#mermaid-1780139603750 .edgeLabel rect{opacity:0.5;background-color:#e8e8e8;fill:#e8e8e8;}#mermaid-1780139603750 .cluster rect{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}#mermaid-1780139603750 .cluster text{fill:#333;}#mermaid-1780139603750 div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:sans-serif;font-size:12px;background:hsl(80,100%,96.2745098039%);border:1px solid #aaaa33;border-radius:2px;pointer-events:none;z-index:100;}#mermaid-1780139603750:root{--mermaid-font-family:sans-serif;}#mermaid-1780139603750:root{--mermaid-alt-font-family:sans-serif;}#mermaid-1780139603750 flowchart-v2{fill:apa;}</style>
